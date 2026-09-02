@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Deterministic Object Record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["object_id", "kind", "state", "sha256", "canonicalization", "created_by"],
+  "properties": {
+    "object_id": {"type": "string", "pattern": "^obj-[a-f0-9]{16,64}$"},
+    "kind": {"type": "string", "minLength": 1},
+    "state": {"enum": ["OBSERVED", "IMPORTED", "DERIVED", "PROPOSED", "CREATED", "VERIFIED"]},
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "canonicalization": {"type": "string", "minLength": 1},
+    "created_by": {"type": "string", "minLength": 1},
+    "source": {"type": "string"},
+    "parent_object_ids": {"type": "array", "items": {"type": "string"}},
+    "verification_ids": {"type": "array", "items": {"type": "string"}},
+    "notes": {"type": "string"}
+  }
+}
