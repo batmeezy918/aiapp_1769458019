@@ -13,16 +13,12 @@ fail() {
   exit 1
 }
 
-# The workflow must build the exact commit it was dispatched for.
 test -n "${GITHUB_SHA:-}" || fail "GITHUB_SHA is unset"
 ACTUAL_COMMIT="$(git rev-parse HEAD)"
 test "$ACTUAL_COMMIT" = "$GITHUB_SHA" || fail "checkout is not the requested commit"
 
-# No untracked, ignored, staged, or modified repository content may silently
-# participate in a build. Generated outputs are not present at this point.
 test -z "$(git status --porcelain=v1 --untracked-files=all)" || fail "working tree is not clean"
 
-# Required inputs must exist and be tracked by Git.
 for f in \
   gradlew \
   gradle/wrapper/gradle-wrapper.jar \
@@ -39,7 +35,7 @@ done
 
 # Reject dependency selectors that can resolve differently without a source
 # commit changing. Versions must be explicit; lockfiles can strengthen this
-# further later without changing this gate's semantics.
+# further without changing this gate's semantics.
 if grep -RInE --exclude-dir=.git --exclude='*.md' \
   '(^|["'"'"'=:[:space:]])([0-9]+\.[0-9]+\.[0-9]+)?[+*]|SNAPSHOT|latest\.release|latest\.integration' \
   build.gradle.kts settings.gradle.kts app/build.gradle.kts gradle pipeline 2>/dev/null; then
@@ -52,19 +48,21 @@ grep -q '^distributionUrl=https\?://' gradle/wrapper/gradle-wrapper.properties \
 grep -q '^distributionSha256Sum=[0-9a-f]\{64\}$' gradle/wrapper/gradle-wrapper.properties \
   || fail "Gradle distribution SHA-256 is missing or malformed"
 
-# Canonical build environment is explicit rather than inherited from runner
-# locale/timezone state.
+SOURCE_DATE_EPOCH_VALUE="$(git show -s --format=%ct "$ACTUAL_COMMIT")"
 printf '%s\n' \
   "commit=$ACTUAL_COMMIT" \
   "locale=$LC_ALL" \
   "timezone=$TZ" \
   "java=${JAVA_VERSION:-unset}" \
   "gradle_wrapper_sha256=$(grep '^distributionSha256Sum=' gradle/wrapper/gradle-wrapper.properties | cut -d= -f2)" \
-  "source_date_epoch=$(git show -s --format=%ct "$ACTUAL_COMMIT")" \
+  "source_date_epoch=$SOURCE_DATE_EPOCH_VALUE" \
   > determinism-contract.txt
 
-# Canonical source-date value is derived from the immutable commit, never wall
-# clock time. Consumers may use this value when a reproducible build setting
-# supports it.
-export SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$ACTUAL_COMMIT")"
+# Export across subsequent GitHub Actions steps when the runner provides the
+# standard environment file. This remains derived solely from the commit.
+export SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH_VALUE"
+if test -n "${GITHUB_ENV:-}"; then
+  echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH_VALUE" >> "$GITHUB_ENV"
+fi
+
 echo "Determinism contract: PASS"
