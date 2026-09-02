@@ -15,6 +15,7 @@ concurrency:
 env:
   JAVA_VERSION: '17'
   GRADLE_OPTS: '-Dorg.gradle.jvmargs=-Xmx3g -Dorg.gradle.daemon=false'
+  EXPECTED_APPLICATION_ID: 'com.google.samples.apps.sunflower'
 
 jobs:
   build:
@@ -46,6 +47,9 @@ jobs:
           test -f gradle/wrapper/gradle-wrapper.properties
           test -f settings.gradle.kts
           test -f app/build.gradle.kts
+          test -f pipeline/schema/object-record.schema.json
+          test -f pipeline/schema/transformation-record.schema.json
+          test -f pipeline/schema/verification-record.schema.json
           chmod +x gradlew
           echo "commit=${GITHUB_SHA}" | tee build-provenance.txt
           echo "java=$(java -version 2>&1 | head -n 1)" | tee -a build-provenance.txt
@@ -53,6 +57,7 @@ jobs:
           echo "gradle_distribution_sha256=$(grep '^distributionSha256Sum=' gradle/wrapper/gradle-wrapper.properties)" | tee -a build-provenance.txt
           echo "android_sdk=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-unset}}" | tee -a build-provenance.txt
           echo "flutter_project=$(test -f pubspec.yaml && echo yes || echo no)" | tee -a build-provenance.txt
+          echo "expected_application_id=${EXPECTED_APPLICATION_ID}" | tee -a build-provenance.txt
 
       - name: Verify Gradle wrapper distribution checksum
         shell: bash
@@ -72,40 +77,99 @@ jobs:
       - name: Assemble release APK
         run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
 
-      - name: Verify APK outputs and metadata
+      - name: Certify APK outputs and provenance
         shell: bash
         run: |
           set -euo pipefail
+
           DEBUG_APK="app/build/outputs/apk/debug/app-debug.apk"
           RELEASE_APK="app/build/outputs/apk/release/app-release.apk"
-          EXPECTED_ID="$(awk -F'"' '/applicationId = / {print $2; exit}' app/build.gradle.kts)"
-          test -n "$EXPECTED_ID"
-          test -s "$DEBUG_APK"
-          test -s "$RELEASE_APK"
-          command -v apkanalyzer
-          apkanalyzer manifest print "$DEBUG_APK" > debug-manifest.txt
-          apkanalyzer manifest print "$RELEASE_APK" > release-manifest.txt
+
+          fail() {
+            echo "CERTIFICATION FAILURE: $1" >&2
+            exit 1
+          }
+
+          test -s "$DEBUG_APK" || fail "debug APK missing or empty"
+          test -s "$RELEASE_APK" || fail "release APK missing or empty"
+          command -v apkanalyzer >/dev/null 2>&1 || fail "apkanalyzer unavailable"
+
+          # Diagnostic captures are non-gating; the semantic checks below are gating.
           apkanalyzer apk summary "$DEBUG_APK" > debug-apk-summary.txt
           apkanalyzer apk summary "$RELEASE_APK" > release-apk-summary.txt
-          DEBUG_ID="$(awk 'NR==1 {print $1; exit}' debug-apk-summary.txt)"
-          RELEASE_ID="$(awk 'NR==1 {print $1; exit}' release-apk-summary.txt)"
-          test -n "$DEBUG_ID"
-          test -n "$RELEASE_ID"
-          printf 'expected_application_id=%s\ndebug_application_id=%s\nrelease_application_id=%s\n' "$EXPECTED_ID" "$DEBUG_ID" "$RELEASE_ID" | tee application-ids.txt
-          test "$DEBUG_ID" = "$EXPECTED_ID"
-          test "$RELEASE_ID" = "$EXPECTED_ID"
+          apkanalyzer manifest print "$DEBUG_APK" > debug-manifest.txt
+          apkanalyzer manifest print "$RELEASE_APK" > release-manifest.txt
+
+          test -s debug-apk-summary.txt || fail "debug APK summary unavailable"
+          test -s release-apk-summary.txt || fail "release APK summary unavailable"
+          test -s debug-manifest.txt || fail "debug manifest unavailable"
+          test -s release-manifest.txt || fail "release manifest unavailable"
+
+          # apkanalyzer output format can vary by SDK/tool revision; locate the
+          # package identifier semantically instead of assuming a line position.
+          extract_package_id() {
+            awk '
+              BEGIN { IGNORECASE=1 }
+              /package/ {
+                line=$0
+                sub(/.*package[[:space:]]*[:=][[:space:]]*/, "", line)
+                gsub(/[[:space:]]+$/, "", line)
+                if (line ~ /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$/) {
+                  print line
+                  exit
+                }
+              }
+            ' "$1"
+          }
+
+          DEBUG_ID="$(extract_package_id debug-manifest.txt)"
+          RELEASE_ID="$(extract_package_id release-manifest.txt)"
+          test -n "$DEBUG_ID" || fail "unable to establish debug application id"
+          test -n "$RELEASE_ID" || fail "unable to establish release application id"
+          test "$DEBUG_ID" = "$EXPECTED_APPLICATION_ID" || fail "debug application id mismatch: $DEBUG_ID"
+          test "$RELEASE_ID" = "$EXPECTED_APPLICATION_ID" || fail "release application id mismatch: $RELEASE_ID"
+
+          DEBUG_SHA="$(sha256sum "$DEBUG_APK" | cut -d' ' -f1)"
+          RELEASE_SHA="$(sha256sum "$RELEASE_APK" | cut -d' ' -f1)"
+          DEBUG_BYTES="$(stat -c '%s' "$DEBUG_APK")"
+          RELEASE_BYTES="$(stat -c '%s' "$RELEASE_APK")"
+          test "$DEBUG_BYTES" -gt 0 || fail "debug APK has zero length"
+          test "$RELEASE_BYTES" -gt 0 || fail "release APK has zero length"
+
+          printf '%s\n' \
+            "expected_application_id=$EXPECTED_APPLICATION_ID" \
+            "debug_application_id=$DEBUG_ID" \
+            "release_application_id=$RELEASE_ID" > application-ids.txt
+
+          printf '%s\n' \
+            "debug_bytes=$DEBUG_BYTES" \
+            "release_bytes=$RELEASE_BYTES" \
+            "commit=$GITHUB_SHA" \
+            "expected_application_id=$EXPECTED_APPLICATION_ID" \
+            "debug_application_id=$DEBUG_ID" \
+            "release_application_id=$RELEASE_ID" \
+            "debug_sha256=$DEBUG_SHA" \
+            "release_sha256=$RELEASE_SHA" > artifact-metadata.txt
+
           sha256sum "$DEBUG_APK" "$RELEASE_APK" > apk-sha256.txt
-          printf 'debug_bytes=' >> artifact-metadata.txt
-          stat -c '%s' "$DEBUG_APK" >> artifact-metadata.txt
-          printf 'release_bytes=' >> artifact-metadata.txt
-          stat -c '%s' "$RELEASE_APK" >> artifact-metadata.txt
-          printf 'commit=%s\n' "$GITHUB_SHA" >> artifact-metadata.txt
-          printf 'expected_application_id=%s\n' "$EXPECTED_ID" >> artifact-metadata.txt
-          printf 'debug_application_id=%s\n' "$DEBUG_ID" >> artifact-metadata.txt
-          printf 'release_application_id=%s\n' "$RELEASE_ID" >> artifact-metadata.txt
-          printf 'debug_sha256=%s\n' "$(sha256sum "$DEBUG_APK" | cut -d' ' -f1)" >> artifact-metadata.txt
-          printf 'release_sha256=%s\n' "$(sha256sum "$RELEASE_APK" | cut -d' ' -f1)" >> artifact-metadata.txt
-          echo 'APK verification: PASS'
+
+          # Creation record: the APK bytes now exist. Verification state is
+          # promoted only after all checks above have passed.
+          printf '%s\n' \
+            "state=CREATED" \
+            "commit=$GITHUB_SHA" \
+            "debug_sha256=$DEBUG_SHA" \
+            "release_sha256=$RELEASE_SHA" > pipeline-creation-record.txt
+
+          printf '%s\n' \
+            "state=VERIFIED" \
+            "gate=apk-identity-and-integrity" \
+            "commit=$GITHUB_SHA" \
+            "debug_sha256=$DEBUG_SHA" \
+            "release_sha256=$RELEASE_SHA" \
+            "verification_basis=apk-nonempty+manifest-identity+sha256" > pipeline-verification-record.txt
+
+          echo 'APK certification: PASS'
 
       - name: Verify optional Flutter project
         if: hashFiles('pubspec.yaml') != ''
@@ -140,3 +204,6 @@ jobs:
             release-manifest.txt
             debug-apk-summary.txt
             release-apk-summary.txt
+            pipeline-creation-record.txt
+            pipeline-verification-record.txt
+            pipeline/schema/*.json
