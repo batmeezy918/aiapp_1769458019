@@ -16,6 +16,9 @@ env:
   JAVA_VERSION: '17'
   GRADLE_OPTS: '-Dorg.gradle.jvmargs=-Xmx3g -Dorg.gradle.daemon=false'
   EXPECTED_APPLICATION_ID: 'com.google.samples.apps.sunflower'
+  LC_ALL: C
+  LANG: C
+  TZ: UTC
 
 jobs:
   build:
@@ -38,6 +41,10 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Enforce determinism contract
+        shell: bash
+        run: bash pipeline/determinism-contract.sh
+
       - name: Verify repository and toolchain inputs
         shell: bash
         run: |
@@ -58,6 +65,7 @@ jobs:
           echo "android_sdk=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-unset}}" | tee -a build-provenance.txt
           echo "flutter_project=$(test -f pubspec.yaml && echo yes || echo no)" | tee -a build-provenance.txt
           echo "expected_application_id=${EXPECTED_APPLICATION_ID}" | tee -a build-provenance.txt
+          echo "source_date_epoch=${SOURCE_DATE_EPOCH}" | tee -a build-provenance.txt
 
       - name: Verify Gradle wrapper distribution checksum
         shell: bash
@@ -105,8 +113,6 @@ jobs:
           test -s debug-manifest.txt || fail "debug manifest unavailable"
           test -s release-manifest.txt || fail "release manifest unavailable"
 
-          # apkanalyzer output format can vary by SDK/tool revision; locate the
-          # package identifier semantically instead of assuming a line position.
           extract_package_id() {
             awk '
               BEGIN { IGNORECASE=1 }
@@ -153,8 +159,6 @@ jobs:
 
           sha256sum "$DEBUG_APK" "$RELEASE_APK" > apk-sha256.txt
 
-          # Creation record: the APK bytes now exist. Verification state is
-          # promoted only after all checks above have passed.
           printf '%s\n' \
             "state=CREATED" \
             "commit=$GITHUB_SHA" \
@@ -199,6 +203,7 @@ jobs:
             apk-sha256.txt
             artifact-metadata.txt
             build-provenance.txt
+            determinism-contract.txt
             application-ids.txt
             debug-manifest.txt
             release-manifest.txt
