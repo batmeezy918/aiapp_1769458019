@@ -23,12 +23,12 @@ jobs:
 
     steps:
       - name: Checkout exact commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Set up Temurin JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
@@ -50,6 +50,7 @@ jobs:
           echo "commit=${GITHUB_SHA}" | tee build-provenance.txt
           echo "java=$(java -version 2>&1 | head -n 1)" | tee -a build-provenance.txt
           echo "gradle_wrapper=$(grep '^distributionUrl=' gradle/wrapper/gradle-wrapper.properties)" | tee -a build-provenance.txt
+          echo "gradle_distribution_sha256=$(grep '^distributionSha256Sum=' gradle/wrapper/gradle-wrapper.properties)" | tee -a build-provenance.txt
           echo "android_sdk=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-unset}}" | tee -a build-provenance.txt
           echo "flutter_project=$(test -f pubspec.yaml && echo yes || echo no)" | tee -a build-provenance.txt
 
@@ -57,19 +58,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          grep -q '^distributionSha256Sum=' gradle/wrapper/gradle-wrapper.properties
+          grep -q '^distributionSha256Sum=9631d53cf3e74bfa726893aee1f8994fee4e060c401335946dba2156f440f24c$' gradle/wrapper/gradle-wrapper.properties
 
       - name: Inspect Gradle dependency graph
-        run: ./gradlew --version dependencies --configuration debugRuntimeClasspath --no-daemon --stacktrace
+        run: ./gradlew :app:dependencies --configuration debugRuntimeClasspath --no-daemon --stacktrace
 
       - name: Run JVM unit tests
-        run: ./gradlew testDebugUnitTest --no-daemon --stacktrace
+        run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
 
       - name: Assemble debug APK
-        run: ./gradlew clean assembleDebug --no-daemon --stacktrace
+        run: ./gradlew :app:clean :app:assembleDebug --no-daemon --stacktrace
 
       - name: Assemble release APK
-        run: ./gradlew assembleRelease --no-daemon --stacktrace
+        run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
 
       - name: Verify APK outputs and metadata
         shell: bash
