@@ -78,6 +78,7 @@ jobs:
           set -euo pipefail
           DEBUG_APK="app/build/outputs/apk/debug/app-debug.apk"
           RELEASE_APK="app/build/outputs/apk/release/app-release.apk"
+          EXPECTED_ID="com.google.samples.apps.sunflower"
           test -s "$DEBUG_APK"
           test -s "$RELEASE_APK"
           command -v apkanalyzer
@@ -85,8 +86,11 @@ jobs:
           apkanalyzer manifest print "$RELEASE_APK" > release-manifest.txt
           apkanalyzer apk summary "$DEBUG_APK" > debug-apk-summary.txt
           apkanalyzer apk summary "$RELEASE_APK" > release-apk-summary.txt
-          grep -q 'com.google.samples.apps.sunflower' debug-manifest.txt
-          grep -q 'com.google.samples.apps.sunflower' release-manifest.txt
+          DEBUG_ID="$(apkanalyzer manifest application-id "$DEBUG_APK")"
+          RELEASE_ID="$(apkanalyzer manifest application-id "$RELEASE_APK")"
+          printf 'debug_application_id=%s\nrelease_application_id=%s\n' "$DEBUG_ID" "$RELEASE_ID" | tee application-ids.txt
+          test "$DEBUG_ID" = "$EXPECTED_ID"
+          test "$RELEASE_ID" = "$EXPECTED_ID"
           sha256sum "$DEBUG_APK" "$RELEASE_APK" > apk-sha256.txt
           printf 'debug_bytes=' >> artifact-metadata.txt
           stat -c '%s' "$DEBUG_APK" >> artifact-metadata.txt
@@ -124,6 +128,7 @@ jobs:
             apk-sha256.txt
             artifact-metadata.txt
             build-provenance.txt
+            application-ids.txt
             debug-manifest.txt
             release-manifest.txt
             debug-apk-summary.txt
