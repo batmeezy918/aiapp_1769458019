@@ -1,18 +1,129 @@
 name: Build APK
-on: [push]
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apk-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JAVA_VERSION: '17'
+  GRADLE_OPTS: '-Dorg.gradle.jvmargs=-Xmx3g -Dorg.gradle.daemon=false'
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v3
+      - name: Checkout exact commit
+        uses: actions/checkout@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
-      - uses: android-actions/setup-android@v3
-      - run: chmod +x gradlew
-      - run: ./gradlew assembleDebug
-      - uses: actions/upload-artifact@v4
+          fetch-depth: 0
+
+      - name: Set up Temurin JDK 17
+        uses: actions/setup-java@v4
         with:
-          name: apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Verify repository and toolchain inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f gradlew
+          test -f gradle/wrapper/gradle-wrapper.jar
+          test -f gradle/wrapper/gradle-wrapper.properties
+          test -f settings.gradle.kts
+          test -f app/build.gradle.kts
+          chmod +x gradlew
+          echo "commit=${GITHUB_SHA}" | tee build-provenance.txt
+          echo "java=$(java -version 2>&1 | head -n 1)" | tee -a build-provenance.txt
+          echo "gradle_wrapper=$(grep '^distributionUrl=' gradle/wrapper/gradle-wrapper.properties)" | tee -a build-provenance.txt
+          echo "android_sdk=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-unset}}" | tee -a build-provenance.txt
+          echo "flutter_project=$(test -f pubspec.yaml && echo yes || echo no)" | tee -a build-provenance.txt
+
+      - name: Verify Gradle wrapper distribution checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q '^distributionSha256Sum=' gradle/wrapper/gradle-wrapper.properties
+
+      - name: Inspect Gradle dependency graph
+        run: ./gradlew --version dependencies --configuration debugRuntimeClasspath --no-daemon --stacktrace
+
+      - name: Run JVM unit tests
+        run: ./gradlew testDebugUnitTest --no-daemon --stacktrace
+
+      - name: Assemble debug APK
+        run: ./gradlew clean assembleDebug --no-daemon --stacktrace
+
+      - name: Assemble release APK
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Verify APK outputs and metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEBUG_APK="app/build/outputs/apk/debug/app-debug.apk"
+          RELEASE_APK="app/build/outputs/apk/release/app-release.apk"
+          test -s "$DEBUG_APK"
+          test -s "$RELEASE_APK"
+          command -v apkanalyzer
+          apkanalyzer manifest print "$DEBUG_APK" > debug-manifest.txt
+          apkanalyzer manifest print "$RELEASE_APK" > release-manifest.txt
+          apkanalyzer apk summary "$DEBUG_APK" > debug-apk-summary.txt
+          apkanalyzer apk summary "$RELEASE_APK" > release-apk-summary.txt
+          grep -q 'com.google.samples.apps.sunflower' debug-manifest.txt
+          grep -q 'com.google.samples.apps.sunflower' release-manifest.txt
+          sha256sum "$DEBUG_APK" "$RELEASE_APK" > apk-sha256.txt
+          printf 'debug_bytes=' >> artifact-metadata.txt
+          stat -c '%s' "$DEBUG_APK" >> artifact-metadata.txt
+          printf 'release_bytes=' >> artifact-metadata.txt
+          stat -c '%s' "$RELEASE_APK" >> artifact-metadata.txt
+          printf 'commit=%s\n' "$GITHUB_SHA" >> artifact-metadata.txt
+          printf 'debug_sha256=%s\n' "$(sha256sum "$DEBUG_APK" | cut -d' ' -f1)" >> artifact-metadata.txt
+          printf 'release_sha256=%s\n' "$(sha256sum "$RELEASE_APK" | cut -d' ' -f1)" >> artifact-metadata.txt
+
+      - name: Verify optional Flutter project
+        if: hashFiles('pubspec.yaml') != ''
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build Flutter APK when Flutter project is present
+        if: hashFiles('pubspec.yaml') != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter doctor -v
+          flutter pub get
+          flutter build apk --release
+
+      - name: Upload complete APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/release/app-release.apk
+            apk-sha256.txt
+            artifact-metadata.txt
+            build-provenance.txt
+            debug-manifest.txt
+            release-manifest.txt
+            debug-apk-summary.txt
+            release-apk-summary.txt
