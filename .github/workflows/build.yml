@@ -78,7 +78,8 @@ jobs:
           set -euo pipefail
           DEBUG_APK="app/build/outputs/apk/debug/app-debug.apk"
           RELEASE_APK="app/build/outputs/apk/release/app-release.apk"
-          EXPECTED_ID="com.google.samples.apps.sunflower"
+          EXPECTED_ID="$(awk -F'"' '/applicationId = / {print $2; exit}' app/build.gradle.kts)"
+          test -n "$EXPECTED_ID"
           test -s "$DEBUG_APK"
           test -s "$RELEASE_APK"
           command -v apkanalyzer
@@ -86,9 +87,11 @@ jobs:
           apkanalyzer manifest print "$RELEASE_APK" > release-manifest.txt
           apkanalyzer apk summary "$DEBUG_APK" > debug-apk-summary.txt
           apkanalyzer apk summary "$RELEASE_APK" > release-apk-summary.txt
-          DEBUG_ID="$(apkanalyzer manifest application-id "$DEBUG_APK")"
-          RELEASE_ID="$(apkanalyzer manifest application-id "$RELEASE_APK")"
-          printf 'debug_application_id=%s\nrelease_application_id=%s\n' "$DEBUG_ID" "$RELEASE_ID" | tee application-ids.txt
+          DEBUG_ID="$(awk 'NR==1 {print $1; exit}' debug-apk-summary.txt)"
+          RELEASE_ID="$(awk 'NR==1 {print $1; exit}' release-apk-summary.txt)"
+          test -n "$DEBUG_ID"
+          test -n "$RELEASE_ID"
+          printf 'expected_application_id=%s\ndebug_application_id=%s\nrelease_application_id=%s\n' "$EXPECTED_ID" "$DEBUG_ID" "$RELEASE_ID" | tee application-ids.txt
           test "$DEBUG_ID" = "$EXPECTED_ID"
           test "$RELEASE_ID" = "$EXPECTED_ID"
           sha256sum "$DEBUG_APK" "$RELEASE_APK" > apk-sha256.txt
@@ -97,8 +100,12 @@ jobs:
           printf 'release_bytes=' >> artifact-metadata.txt
           stat -c '%s' "$RELEASE_APK" >> artifact-metadata.txt
           printf 'commit=%s\n' "$GITHUB_SHA" >> artifact-metadata.txt
+          printf 'expected_application_id=%s\n' "$EXPECTED_ID" >> artifact-metadata.txt
+          printf 'debug_application_id=%s\n' "$DEBUG_ID" >> artifact-metadata.txt
+          printf 'release_application_id=%s\n' "$RELEASE_ID" >> artifact-metadata.txt
           printf 'debug_sha256=%s\n' "$(sha256sum "$DEBUG_APK" | cut -d' ' -f1)" >> artifact-metadata.txt
           printf 'release_sha256=%s\n' "$(sha256sum "$RELEASE_APK" | cut -d' ' -f1)" >> artifact-metadata.txt
+          echo 'APK verification: PASS'
 
       - name: Verify optional Flutter project
         if: hashFiles('pubspec.yaml') != ''
