@@ -1,0 +1,201 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schemaVersion": "1.0.0",
+  "source": {
+    "repository": "juspay/hyperswitch",
+    "ref": "main",
+    "classification": "REFERENCE_ARCHITECTURE",
+    "licenseObserved": "Apache-2.0",
+    "sourceNote": "This manifest records architecture/capability patterns to evaluate and adapt. It does not copy HyperSwitch implementation code or assert conformance to payment-network rules."
+  },
+  "adoptionPolicy": {
+    "mode": "DERIVE_AND_ADAPT",
+    "copyProductionPaymentCredentials": false,
+    "allowLivePaymentExecution": false,
+    "paymentDecision": "NOT_EVALUATED",
+    "authorityBoundary": "EMVCo_ISO_NETWORK_RULES_REMAIN_NORMATIVE",
+    "thirdPartyMetadataIsNotOfficial": true
+  },
+  "capabilities": [
+    {
+      "id": "PAYMENT_ORCHESTRATOR",
+      "sourcePattern": "Router",
+      "statusInOurSystem": "MISSING",
+      "adopt": true,
+      "target": "Deterministic verification command plane",
+      "adaptation": "Map payment-routing orchestration to ADMIT -> NORMALIZE -> QUOTIENT -> INSTANTIATE -> EXECUTE -> COMPARE -> FALSIFY -> REPLAY -> CERTIFY."
+    },
+    {
+      "id": "JOB_SCHEDULER_PRODUCER_CONSUMER",
+      "sourcePattern": "Scheduler Producer/Consumer with Redis queue",
+      "statusInOurSystem": "MISSING",
+      "adopt": true,
+      "target": "Background verification jobs",
+      "adaptation": "Use Floot scheduled/background jobs and durable Postgres state; GitHub Actions handles compute-heavy fan-out where appropriate."
+    },
+    {
+      "id": "CARD_METADATA",
+      "sourcePattern": "card_metadata crate and embedded canonical configuration",
+      "statusInOurSystem": "PARTIAL",
+      "adopt": true,
+      "target": "Versioned card/BIN semantic registry",
+      "adaptation": "Extend existing official-BIN records with canonical card subtype/product metadata, provenance, source digest, validity interval, and admission state."
+    },
+    {
+      "id": "CONNECTOR_ABSTRACTION",
+      "sourcePattern": "Connector-based integrations and connector configs",
+      "statusInOurSystem": "MISSING",
+      "adopt": true,
+      "target": "Protocol/executor adapter registry",
+      "adaptation": "Represent EMV/kernel/terminal/reference executors as typed adapters with capability declarations, versions, evidence requirements, and deterministic input/output contracts."
+    },
+    {
+      "id": "INTELLIGENT_ROUTING",
+      "sourcePattern": "Rule-based, fallback, multi-parameter routing",
+      "statusInOurSystem": "MISSING",
+      "adopt": true,
+      "target": "Evidence-gated execution routing",
+      "adaptation": "Route a verification object to admissible executors/test suites based on scheme, protocol phase, card metadata, evidence strength, and capability compatibility."
+    },
+    {
+      "id": "RETRY_POLICY",
+      "sourcePattern": "Smart retries and fallback routing",
+      "statusInOurSystem": "PARTIAL",
+      "adopt": true,
+      "target": "Bounded deterministic retry/replay policy",
+      "adaptation": "Retries are for verification jobs only; every attempt receives an ordinal, seed/input digest, executor version, and reason. No uncontrolled infinite retry."
+    },
+    {
+      "id": "PAYMENT_LIFECYCLE_EVENTS",
+      "sourcePattern": "Structured payment lifecycle webhook events",
+      "statusInOurSystem": "PARTIAL",
+      "adopt": true,
+      "target": "Verification lifecycle event ledger",
+      "adaptation": "Emit admitted, instantiated, started, step, divergence, replayed, falsified, certified, and rejected events with immutable correlation IDs and hashes."
+    },
+    {
+      "id": "WEBHOOK_EVENTING",
+      "sourcePattern": "Webhook delivery and signature verification",
+      "statusInOurSystem": "MISSING",
+      "adopt": true,
+      "target": "External verification event callback",
+      "adaptation": "Add signed outbound verification events for long-running jobs, never including PAN/credentials; support replay-safe event IDs and verification of signatures."
+    },
+    {
+      "id": "IDEMPOTENCY_AND_API_LOCKING",
+      "sourcePattern": "API locking/idempotent payment operations",
+      "statusInOurSystem": "PARTIAL",
+      "adopt": true,
+      "target": "Idempotent verification commands",
+      "adaptation": "Bind command identity to verificationObjectId + inputDigest + policyVersion + executorVersion; duplicate commands resolve to the existing run."
+    },
+    {
+      "id": "RECONCILIATION",
+      "sourcePattern": "2-way/3-way reconciliation and settlement exports",
+      "statusInOurSystem": "MISSING",
+      "adopt": true,
+      "target": "Evidence reconciliation",
+      "adaptation": "Reconcile declared source evidence, generated fixture, execution ledger, reference executor, replay result, and certificate; report missing/mismatched edges rather than silently repairing them."
+    },
+    {
+      "id": "OBSERVABILITY_OTEL_STYLE",
+      "sourcePattern": "OTLP traces, Prometheus metrics, Loki logs, Tempo traces",
+      "statusInOurSystem": "PARTIAL",
+      "adopt": true,
+      "target": "Verification telemetry",
+      "adaptation": "Use structured metrics/logs/traces around every command and executor attempt; keep observability replaceable and never make it an authority source."
+    },
+    {
+      "id": "VAULT_BOUNDARY",
+      "sourcePattern": "Locker/external vault separation",
+      "statusInOurSystem": "PARTIAL",
+      "adopt": true,
+      "target": "Synthetic credential boundary",
+      "adaptation": "Keep all test card material synthetic. Model a vault boundary only as a verification interface; never import or persist live PAN/payment credentials."
+    },
+    {
+      "id": "AUTHENTICATION_3DS",
+      "sourcePattern": "Authentication/3DS flows",
+      "statusInOurSystem": "MISSING",
+      "adopt": true,
+      "target": "Authentication protocol test domain",
+      "adaptation": "Add 3DS/authentication as a separate deterministic protocol domain with explicit state transitions and evidence contracts; do not claim production authentication."
+    },
+    {
+      "id": "FRAUD_BLOCKLIST",
+      "sourcePattern": "Blocklist/card-testing guard/fraud controls",
+      "statusInOurSystem": "MISSING",
+      "adopt": true,
+      "target": "Adversarial verification guards",
+      "adaptation": "Add bounded anti-abuse/adversarial fixtures and negative tests to verify rejection paths, rate/attempt policies, and safety gates."
+    },
+    {
+      "id": "ACCOUNT_UPDATER",
+      "sourcePattern": "Account updater lifecycle",
+      "statusInOurSystem": "MISSING",
+      "adopt": true,
+      "target": "Card metadata mutation/revalidation",
+      "adaptation": "Model metadata changes as versioned transformations requiring re-admission and re-verification; never mutate a previously certified object in place."
+    },
+    {
+      "id": "CONFIG_IMPORTER",
+      "sourcePattern": "Config importer and connector configuration",
+      "statusInOurSystem": "PARTIAL",
+      "adopt": true,
+      "target": "Evidence/config ingestion",
+      "adaptation": "Normalize imported public evidence/configuration into versioned, hashed, schema-validated records before admission."
+    },
+    {
+      "id": "ANALYTICS_COST_OBSERVABILITY",
+      "sourcePattern": "Analytics/cost observability",
+      "statusInOurSystem": "MISSING",
+      "adopt": true,
+      "target": "Verification cost/performance analytics",
+      "adaptation": "Track executor time, queue time, retries, artifact size, test cardinality, quotient reduction, divergence rate, and evidence completeness."
+    },
+    {
+      "id": "MULTI_DATABASE_READ_REPLICA_MODEL",
+      "sourcePattern": "Postgres master/replica architecture",
+      "statusInOurSystem": "PARTIAL",
+      "adopt": false,
+      "target": "Future scale boundary",
+      "adaptation": "Do not add replication solely for feature parity. Floot Postgres is sufficient until measured read/write pressure requires it."
+    },
+    {
+      "id": "REDIS_QUEUE",
+      "sourcePattern": "Redis cache/queue",
+      "statusInOurSystem": "MISSING",
+      "adopt": false,
+      "target": "Future high-throughput queue",
+      "adaptation": "Prefer Floot-managed background/scheduled jobs first. Add Redis only if measured queue semantics/throughput justify the dependency."
+    }
+  ],
+  "verificationExtensions": {
+    "newLifecycleStates": [
+      "ADMITTED",
+      "NORMALIZED",
+      "QUOTIENTED",
+      "INSTANTIATED",
+      "QUEUED",
+      "EXECUTING",
+      "COMPARED",
+      "FALSIFIED",
+      "REPLAYED",
+      "CERTIFIED",
+      "REJECTED"
+    ],
+    "requiredEvidenceEdges": [
+      "source->claim",
+      "claim->quotient",
+      "quotient->representative",
+      "representative->fixture",
+      "fixture->execution",
+      "execution->independent_execution",
+      "independent_execution->equivalence",
+      "equivalence->replay",
+      "replay->certificate"
+    ],
+    "claimStrengthRule": "CLAIM_STRENGTH <= EVIDENCE_STRENGTH",
+    "paymentApprovalRule": "paymentDecision MUST remain NOT_EVALUATED in the verification lab"
+  }
+}
